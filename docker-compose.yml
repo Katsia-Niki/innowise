@@ -1,0 +1,139 @@
+services:
+  epic-auth-postgres:
+    image: postgres:16-alpine
+    container_name: epic-auth-postgres
+    environment:
+      POSTGRES_DB: epic-auth-service
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5434:5432"
+    volumes:
+      - auth-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d epic-auth-service"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  epic-user-service-postgres:
+    image: postgres:16-alpine
+    container_name: epic-user-service-postgres
+    environment:
+      POSTGRES_DB: epic_user_service
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - user-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d epic_user_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  epic-order-postgres:
+    image: postgres:16-alpine
+    container_name: epic-order-postgres
+    environment:
+      POSTGRES_DB: epic_order_service
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5435:5432"
+    volumes:
+      - order-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d epic_order_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: epic-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  epic-auth-service:
+    build: ../epic-auth-service/epic-auth-service
+    container_name: epic-auth-service
+    ports:
+      - "8083:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL}
+    depends_on:
+      epic-auth-postgres:
+        condition: service_healthy
+
+  epic-user-service:
+    build: ../epic-user-service/epic-user-service
+    container_name: epic-user-service
+    ports:
+      - "8081:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    depends_on:
+      epic-user-service-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  epic-order-service:
+    build: ../epic-order-service/epic-order-service
+    container_name: epic-order-service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8082
+      DB_URL: jdbc:postgresql://epic-order-postgres:5432/epic_order_service
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      USER_SERVICE_URL: http://epic-user-service:8080
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      epic-order-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      epic-user-service:
+        condition: service_started
+
+  gateway:
+    build: ../gateway/gateway
+    container_name: gateway
+    ports:
+      - "8080:8080"
+    environment:
+      AUTH_SERVICE_URI: http://epic-auth-service:8080
+      USER_SERVICE_URI: http://epic-user-service:8080
+      ORDER_SERVICE_URI: http://epic-order-service:8082
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    depends_on:
+      - epic-auth-service
+      - epic-user-service
+      - epic-order-service
+
+volumes:
+  auth-postgres-data:
+  user-postgres-data:
+  order-postgres-data:
