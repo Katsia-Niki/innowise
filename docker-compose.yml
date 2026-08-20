@@ -1,0 +1,154 @@
+services:
+  epic-auth-postgres:
+    image: postgres:16-alpine
+    container_name: epic-auth-postgres
+    environment:
+      POSTGRES_DB: epic-auth-service
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - auth-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d epic-auth-service"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - auth-internal
+
+  epic-user-service-postgres:
+    image: postgres:16-alpine
+    container_name: epic-user-service-postgres
+    environment:
+      POSTGRES_DB: epic_user_service
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - user-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d epic_user_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - user-internal
+
+  epic-order-postgres:
+    image: postgres:16-alpine
+    container_name: epic-order-postgres
+    environment:
+      POSTGRES_DB: epic_order_service
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - order-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d epic_order_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - order-internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: epic-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cache
+
+  epic-auth-service:
+    build: ../epic-auth-service/epic-auth-service
+    container_name: epic-auth-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      USER_SERVICE_URL: http://epic-user-service:8080
+    depends_on:
+      epic-auth-postgres:
+        condition: service_healthy
+    networks:
+      - inno-net
+      - auth-internal
+
+  epic-user-service:
+    build: ../epic-user-service/epic-user-service
+    container_name: epic-user-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    depends_on:
+      epic-user-service-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - inno-net
+      - user-internal
+      - cache
+
+  epic-order-service:
+    build: ../epic-order-service/epic-order-service
+    container_name: epic-order-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8082
+      DB_URL: jdbc:postgresql://epic-order-postgres:5432/${ORDER_DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      USER_SERVICE_URL: http://epic-user-service:8080
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      epic-order-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      epic-user-service:
+        condition: service_started
+    networks:
+      - inno-net
+      - order-internal
+      - cache
+
+  gateway:
+    build: ../gateway/gateway
+    container_name: gateway
+    ports:
+      - "8080:8080"
+    environment:
+      AUTH_SERVICE_URI: http://epic-auth-service:8080
+      USER_SERVICE_URI: http://epic-user-service:8080
+      ORDER_SERVICE_URI: http://epic-order-service:8082
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      - epic-auth-service
+      - epic-user-service
+      - epic-order-service
+    networks:
+      - inno-net
+
+volumes:
+  auth-postgres-data:
+  user-postgres-data:
+  order-postgres-data:
+
+networks:
+  inno-net:
+  auth-internal:
+  user-internal:
+  order-internal:
+  cache:
