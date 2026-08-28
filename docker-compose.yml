@@ -160,6 +160,7 @@ services:
       - epic-auth-service
       - epic-user-service
       - epic-order-service
+      - epic-payment-service
     networks:
       - inno-net
 
